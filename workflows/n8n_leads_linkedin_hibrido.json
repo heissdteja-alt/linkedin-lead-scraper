@@ -1,0 +1,419 @@
+{
+  "name": "Leads LinkedIn - Hibrido Serper + Apify",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Generador de Leads LinkedIn",
+        "formDescription": "Descubrimiento barato via Serper + enriquecimiento selectivo via Apify",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Puesto",
+              "placeholder": "Gerente de Compras",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Ciudad",
+              "placeholder": "Ciudad de Mexico",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Palabras clave empresa",
+              "placeholder": "manufactura, retail (separadas por coma)"
+            },
+            {
+              "fieldLabel": "Paginas por consulta",
+              "fieldType": "number",
+              "placeholder": "3",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b850ddb3-1592-407b-97c8-a142c6c169b6",
+      "name": "Formulario",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [
+        -460,
+        300
+      ],
+      "webhookId": "2384a873-d54b-4548-957f-36aa71908fb3"
+    },
+    {
+      "parameters": {
+        "jsCode": "// === GENERADOR DE CONSULTAS PARA SERPER ===\n// 1 credito = 1 query con num<=10. num entre 11 y 100 cuesta 2 creditos.\n// OJO: Google retiro el parametro num=100 a finales de 2025. Antes de subir num,\n// corre una prueba y cuenta cuantos organic realmente regresan.\n\nconst f = $input.first().json;\n\nconst puesto    = String(f['Puesto'] || '').trim();\nconst ciudad    = String(f['Ciudad'] || '').trim();\nconst kwEmpresa = String(f['Palabras clave empresa'] || '')\n                    .split(',').map(s => s.trim()).filter(Boolean);\nconst paginas   = Math.max(1, Math.min(10, Number(f['Paginas por consulta']) || 3));\n\n// Variantes: la base siempre, mas una por keyword de industria/empresa\nconst variantes = [`\"${puesto}\" \"${ciudad}\"`];\nfor (const kw of kwEmpresa) {\n  variantes.push(`\"${puesto}\" \"${ciudad}\" \"${kw}\"`);\n}\n\nconst out = [];\nfor (const v of variantes) {\n  for (let p = 1; p <= paginas; p++) {\n    out.push({ json: {\n      q: `site:linkedin.com/in ${v}`,\n      gl: 'mx',\n      hl: 'es',\n      num: 10,      // subir a 100 SOLO si la prueba confirma que Serper los entrega\n      page: p,\n      _puesto: puesto,\n      _ciudad: ciudad\n    }});\n  }\n}\n\nreturn out;"
+      },
+      "id": "2b721951-8d0a-405f-b5c9-7a468869a6e1",
+      "name": "Generar consultas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://google.serper.dev/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-KEY",
+              "value": "PON_AQUI_TU_SERPER_API_KEY"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ q: $json.q, gl: $json.gl, hl: $json.hl, num: $json.num, page: $json.page }) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 5,
+              "batchInterval": 1000
+            }
+          },
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "f9131821-52e1-45f7-bde9-e1713dba037f",
+      "name": "Serper - Descubrimiento",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -20,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "// === PARSEO + DEDUP + SCORING ===\n// El title de Google suele venir como: \"Nombre - Puesto - Empresa | LinkedIn\"\n// pero NO siempre: headlines personalizados y truncados rompen el patron.\n// Por eso marcamos parseo_ok y no descartamos por formato.\n\nconst objetivo = String($('Generar consultas').first().json._puesto || '');\n\nconst norm = s => String(s || '')\n  .toLowerCase()\n  .normalize('NFD')\n  .replace(/[\\u0300-\\u036f]/g, '');\n\nconst tokens = norm(objetivo).split(/\\s+/).filter(t => t.length > 3);\n\nconst vistos = new Set();\nconst out = [];\n\nfor (const item of $input.all()) {\n  const organic = item.json.organic || [];\n\n  for (const r of organic) {\n    let url = String(r.link || '').split('?')[0].replace(/\\/+$/, '');\n    if (!/linkedin\\.com\\/in\\//i.test(url)) continue;\n    if (vistos.has(url)) continue;\n    vistos.add(url);\n\n    const limpio = String(r.title || '').replace(/\\s*[|\\-\\u2013]\\s*LinkedIn.*$/i, '').trim();\n    const partes = limpio.split(/\\s+-\\s+/).map(s => s.trim()).filter(Boolean);\n\n    const nombre  = partes[0] || '';\n    const puesto  = partes[1] || '';\n    const empresa = partes.slice(2).join(' - ');\n\n    const texto = norm(`${puesto} ${r.snippet || ''}`);\n    const hits  = tokens.filter(t => texto.includes(t)).length;\n    const score = tokens.length ? hits / tokens.length : 0;\n\n    out.push({ json: {\n      nombre,\n      puesto,\n      empresa,\n      url,\n      snippet: String(r.snippet || ''),\n      parseo_ok: partes.length >= 3,\n      score: Number(score.toFixed(2)),\n      califica: score >= 0.5 && partes.length >= 2,\n      fuente: 'serper',\n      fecha: new Date().toISOString().slice(0, 10)\n    }});\n  }\n}\n\nreturn out;"
+      },
+      "id": "ddebc918-aef0-4a87-b463-b6a7c57a7e7b",
+      "name": "Parsear y calificar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "f71e9935-9746-48fa-a5a1-fb08672bca76",
+              "leftValue": "={{ $json.califica }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
+      },
+      "id": "25fc97f1-d51c-40e4-8172-68e50dfe6107",
+      "name": "Califica?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        420,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// === LOTES PARA APIFY ===\n// run-sync-get-dataset-items corta a los 300s. Lotes de 50 dejan margen.\n// Si tu actor es lento, baja a 25.\n\nconst TAM = 50;\n\nconst items = $input.all().map(i => i.json);\nconst lotes = [];\n\nfor (let i = 0; i < items.length; i += TAM) {\n  const slice = items.slice(i, i + TAM);\n  lotes.push({ json: {\n    profileUrls: slice.map(x => x.url),\n    _meta: slice,\n    _lote: (i / TAM) + 1,\n    _total_lotes: Math.ceil(items.length / TAM)\n  }});\n}\n\nreturn lotes;"
+      },
+      "id": "6be7a61e-2dc4-40ae-ae76-0bc297274fb6",
+      "name": "Lotes para Apify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apify.com/v2/acts/supreme_coder~linkedin-profile-scraper/run-sync-get-dataset-items",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "token",
+              "value": "PON_AQUI_TU_APIFY_TOKEN"
+            },
+            {
+              "name": "timeout",
+              "value": "280"
+            },
+            {
+              "name": "format",
+              "value": "json"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ profileUrls: $json.profileUrls }) }}",
+        "options": {
+          "timeout": 300000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "85df6844-6a75-416a-b950-3f7454b159c1",
+      "name": "Apify - Enriquecimiento",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        860,
+        180
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "// === APLANAR RESPUESTA DE APIFY + MERGE CON LO DE SERPER ===\n// Los nombres de campo cambian entre actors. Los fallbacks cubren\n// las convenciones mas comunes; ajusta tras tu primera corrida real.\n\nconst byUrl = {};\nfor (const l of $('Lotes para Apify').all()) {\n  for (const m of (l.json._meta || [])) byUrl[m.url] = m;\n}\n\nconst out = [];\n\nfor (const item of $input.all()) {\n  const j = item.json;\n  const perfiles = Array.isArray(j) ? j\n                 : Array.isArray(j.items) ? j.items\n                 : [j];\n\n  for (const p of perfiles) {\n    if (!p || typeof p !== 'object') continue;\n\n    const url = String(p.linkedinUrl || p.url || p.profileUrl || p.publicIdentifier || '')\n                  .split('?')[0].replace(/\\/+$/, '');\n    if (!url) continue; // respuesta de error o forma inesperada, no escribir fila vacia\n    const base = byUrl[url] || {};\n\n    out.push({ json: {\n      url:            url || base.url || '',\n      nombre:         p.fullName || p.name || base.nombre || '',\n      titular:        p.headline || '',\n      puesto_actual:  p.jobTitle || p.currentPosition || base.puesto || '',\n      empresa_actual: p.companyName || p.company || base.empresa || '',\n      empresa_url:    p.companyWebsite || p.companyLinkedinUrl || '',\n      industria:      p.companyIndustry || p.industry || '',\n      tam_empresa:    p.companySize || p.employeeCount || '',\n      ubicacion:      p.location || p.addressWithCountry || base.ciudad || '',\n      email:          p.email || '',\n      seguidores:     p.followers || p.connections || '',\n      score:          base.score ?? '',\n      fuente:         'serper+apify',\n      fecha:          new Date().toISOString().slice(0, 10)\n    }});\n  }\n}\n\nreturn out;"
+      },
+      "id": "c78f2c69-5a7a-4b20-b35d-e961df14e904",
+      "name": "Normalizar perfiles",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1080,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "PON_AQUI_TU_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Leads",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": [
+            "url"
+          ],
+          "value": {},
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "7745e361-97eb-42d1-b505-6b02daf27a93",
+      "name": "Sheets - Leads calificados",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1300,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "PON_AQUI_TU_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Descartados",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": [
+            "url"
+          ],
+          "value": {},
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "bcddd292-5fb1-45f7-99e0-0a97e0de95c7",
+      "name": "Sheets - Descartados",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        640,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Antes de correr\n\n1. Sustituye `PON_AQUI_TU_*` por credenciales reales (mejor: crea Credentials de n8n en vez de dejar la key en el nodo).\n2. **Verifica el input schema del actor de Apify.** `profileUrls` es la convencion mas comun pero varia. Abre la pagina del actor -> Input -> copia el nombre exacto del campo.\n3. Corre primero con 1 pagina y `Califica? = false` desconectado, para medir tu tasa real de parseo antes de gastar en Apify.\n4. Google retiro `num=100` a fines de 2025. El workflow usa `num=10` (1 credito). Si subes a 100 son 2 creditos y puede que no entregue 100.",
+        "height": 320,
+        "width": 420,
+        "color": 5
+      },
+      "id": "963ca80e-c0bd-4cfc-a370-cb760266a453",
+      "name": "Notas",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -460,
+        540
+      ]
+    }
+  ],
+  "connections": {
+    "Formulario": {
+      "main": [
+        [
+          {
+            "node": "Generar consultas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generar consultas": {
+      "main": [
+        [
+          {
+            "node": "Serper - Descubrimiento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Serper - Descubrimiento": {
+      "main": [
+        [
+          {
+            "node": "Parsear y calificar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsear y calificar": {
+      "main": [
+        [
+          {
+            "node": "Califica?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Califica?": {
+      "main": [
+        [
+          {
+            "node": "Lotes para Apify",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sheets - Descartados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lotes para Apify": {
+      "main": [
+        [
+          {
+            "node": "Apify - Enriquecimiento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apify - Enriquecimiento": {
+      "main": [
+        [
+          {
+            "node": "Normalizar perfiles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar perfiles": {
+      "main": [
+        [
+          {
+            "node": "Sheets - Leads calificados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": true
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "hibrido-serper-apify"
+  },
+  "tags": []
+}

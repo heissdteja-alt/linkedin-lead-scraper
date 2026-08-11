@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>{{ modos[modo].titulo }}</title>
+  <style>
+    body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; background: #0f172a; color: #e5e7eb;
+           display: flex; align-items: flex-start; justify-content: center; min-height: 100vh; margin: 0; padding: 40px 16px; }
+    .card { background: #1e293b; padding: 32px; border-radius: 12px; max-width: 520px; width: 100%;
+            box-shadow: 0 10px 30px rgba(0,0,0,.4); }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    .sub { color: #94a3b8; font-size: 13px; margin-bottom: 24px; }
+    .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .topbar a { color: #60a5fa; font-size: 12px; text-decoration: none; }
+    label { display: block; font-size: 13px; font-weight: 600; margin: 16px 0 6px; }
+    textarea, input { width: 100%; box-sizing: border-box; background: #0f172a; border: 1px solid #334155;
+            border-radius: 8px; padding: 10px 12px; color: #e5e7eb; font-size: 14px; }
+    small { color: #64748b; font-size: 11px; }
+    button { margin-top: 24px; width: 100%; background: #2563eb; color: #fff; border: none; padding: 12px;
+             border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; }
+    button:hover { background: #1d4ed8; }
+
+    .source-block { margin-bottom: 20px; }
+    .segmented { display: flex; border: 1px solid #334155; border-radius: 8px; overflow: hidden; margin-top: 6px; }
+    .segmented a.seg-btn { flex: 1; text-align: center; padding: 10px 0; cursor: pointer; margin: 0;
+             font-size: 13px; font-weight: 600; color: #94a3b8; background: #0f172a; text-decoration: none; display: block; }
+    .segmented a.seg-btn:first-of-type { border-right: 1px solid #334155; }
+    .segmented a.seg-btn.activo { background: #2563eb; color: #fff; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="topbar">
+      <span class="sub" style="margin:0">{{ user_email }}</span>
+      <a href="{{ url_for('logout') }}">Cerrar sesion</a>
+    </div>
+
+    <div class="source-block">
+      <label style="margin-top:0">Modo</label>
+      <div class="segmented">
+        <a href="{{ url_for('index', modo='prospeccion') }}" class="seg-btn {{ 'activo' if modo == 'prospeccion' else '' }}">Prospeccion Servicios</a>
+        <a href="{{ url_for('index', modo='linkedin') }}" class="seg-btn {{ 'activo' if modo == 'linkedin' else '' }}">Leads LinkedIn</a>
+      </div>
+    </div>
+
+    <h1>{{ modos[modo].titulo }}</h1>
+    <div class="sub">{{ modos[modo].descripcion }}</div>
+
+    <form method="POST" action="{{ url_for('run') }}">
+      <label>Puesto *</label>
+      <input type="text" name="Puesto" required placeholder="{{ modos[modo].placeholder_puesto }}">
+
+      <label>Ciudad *</label>
+      <input type="text" name="Ciudad" required placeholder="Ciudad de Mexico">
+
+      <label>Palabras clave empresa</label>
+      <input type="text" name="PalabrasClaveEmpresa" placeholder="{{ modos[modo].placeholder_kw }}">
+
+      <label>Paginas por consulta *</label>
+      <input type="number" name="PaginasPorConsulta" required placeholder="3" min="1" max="10">
+
+      <button type="submit">Buscar leads</button>
+    </form>
+  </div>
+</body>
+</html>

@@ -1,0 +1,8 @@
+.env
+*.log
+data/*.csv
+data/*.json
+client_secret.json
+token.json
+__pycache__/
+*.pyc

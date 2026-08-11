@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Leads LinkedIn - Resultado</title>
+  <style>
+    body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; background: #0f172a; color: #e5e7eb;
+           display: flex; align-items: flex-start; justify-content: center; min-height: 100vh; margin: 0; padding: 40px 16px; }
+    .card { background: #1e293b; padding: 32px; border-radius: 12px; max-width: 520px; width: 100%;
+            box-shadow: 0 10px 30px rgba(0,0,0,.4); }
+    h1 { font-size: 20px; margin: 0 0 16px; }
+    .ok { color: #4ade80; }
+    .err { color: #f87171; }
+    .warn { color: #fbbf24; }
+    table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 13px; }
+    th, td { border: 1px solid #334155; padding: 8px; text-align: left; }
+    th { background: #0f172a; }
+    pre { white-space: pre-wrap; background: #0f172a; padding: 12px; border-radius: 8px; font-size: 12px; }
+    a { color: #60a5fa; text-decoration: none; display: inline-block; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    {% if ok %}
+      <h1 class="ok">Listo &mdash; {{ result.calificados }} calificados / {{ result.rechazados }} rechazados</h1>
+      <table>
+        <tr><th>Metrica</th><th>Valor</th></tr>
+        <tr><td>Consultas a Serper</td><td>{{ result.consultas_totales }}{% if result.consultas_fallidas %} ({{ result.consultas_fallidas }} fallaron){% endif %}</td></tr>
+        <tr><td>URLs unicas descubiertas</td><td>{{ result.urls_descubiertas }}</td></tr>
+        <tr><td>Calificados (enviados a Apify)</td><td>{{ result.calificados }}</td></tr>
+        <tr><td>Rechazados</td><td>{{ result.rechazados }}</td></tr>
+        <tr><td>Perfiles guardados (enriquecidos)</td><td>{{ result.enriquecidos }}</td></tr>
+      </table>
+      {% if result.lotes_apify_fallidos %}
+      <p class="warn">{{ result.lotes_apify_fallidos }} lote(s) de Apify fallaron - esos leads se guardaron sin enriquecer.</p>
+      {% endif %}
+    {% else %}
+      <h1 class="err">Algo fallo</h1>
+      <pre>{{ error }}</pre>
+    {% endif %}
+    <a href="{{ url_for('index') }}">&larr; Volver</a>
+  </div>
+</body>
+</html>
