@@ -133,3 +133,4 @@ cobrar doble sin entregar mas resultados.
 
 Ver [`CLAUDE.md`](CLAUDE.md) para el resto de las decisiones de diseno originales
 y el modelo de costos (`scripts/costos.py`).
+Autor: Pablo Teja
